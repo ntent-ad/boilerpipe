@@ -244,6 +244,12 @@ public class HTMLTagBalancer
     /** True if a form is in the stack (allow to discard opening of nested forms) */
     protected boolean fOpenedForm;
 
+    /** Variable to track the element recursion and bail out before a stack trace occurs. 
+     * This is a known issue of nekohtml 1.9.13 which is needed for Boilerpipe. A later version
+     * of nekohtml was tested (1.9.15 and 1.9.22) with no success since it changes slightly
+     * the way the element depth is determined and this causes Boilerpipe to lose content at times 
+     * See also: https://github.com/raihan2108/boilerpipe/issues/50  */
+    protected int stackCheckCounter = 0;
     // temp vars
 
     /** A qualified name. */
@@ -327,6 +333,7 @@ public class HTMLTagBalancer
         fErrorReporter = (HTMLErrorReporter)manager.getProperty(ERROR_REPORTER);
         
         fragmentContextStack_ = (QName[]) manager.getProperty(FRAGMENT_CONTEXT_STACK);
+        stackCheckCounter = 0;
 
     } // reset(XMLComponentManager)
 
@@ -545,6 +552,7 @@ public class HTMLTagBalancer
     public void startElement(final QName elem, XMLAttributes attrs, final Augmentations augs)
         throws XNIException {
         fSeenAnything = true;
+        stackCheckCounter++;
         
         final boolean isForcedCreation = forcedStartElement_;
         forcedStartElement_ = false;
@@ -965,7 +973,8 @@ public class HTMLTagBalancer
     /** End element. */
     public void endElement(final QName element, final Augmentations augs) throws XNIException {
     	final boolean forcedEndElement = forcedEndElement_;
-        // is there anything to do?
+        stackCheckCounter--;
+       // is there anything to do?
         if (fSeenRootElementEnd) {
         	notifyDiscardedEndElement(element, augs);
             return;
@@ -998,6 +1007,10 @@ public class HTMLTagBalancer
         // empty element
         int depth = getElementDepth(elem);
         if (depth == -1) {
+        	if (stackCheckCounter >= 1000) {
+        		// break the cycle which leads to stack overflow in some documents.
+        		throw new XNIException("StackCheck exception. Element depth is greater than 1000. Abort document processing.");
+        	}
         	if (elem.code == HTMLElements.P) {
         		forceStartElement(element, emptyAttributes(), synthesizedAugs());
 	            endElement(element, augs);
